@@ -1,10 +1,9 @@
-use std::cmp::Ordering;
 use std::f64::consts::PI;
 
 use rosrust::{ros_info, Publisher};
 use rosrust_msg::{geometry_msgs, nav_msgs::Odometry};
 
-const NUMBER_OF_POINTS: usize = 500;
+const NUMBER_OF_POINTS: usize = 150;
 const MAX_LINEAR_VELOCIY: f64 = 1.5;
 const MAX_ANGULAR_VELOCITY: f64 = 1.5;
 const THETA_START: f64 = 0.0;
@@ -31,18 +30,30 @@ fn main() {
     let pub_real_ang_vel = rosrust::publish("real_ang_vel", 10).unwrap();
     pub_real_ang_vel.wait_for_subscribers(None).unwrap();
 
-    let odom_sub = rosrust::subscribe("odom", 2, |odometry: Odometry| unsafe {
+    let odom_sub = rosrust::subscribe("odom", 10, |odometry: Odometry| unsafe {
         LINEAR_VEL_REAL = odometry.twist.twist.linear.x;
         ANGULAR_VEL_REAL = odometry.twist.twist.angular.z;
     })
     .unwrap();
 
-    let time_points = calculate_time_points();
-    let points_of_trajectory = calculate_points_of_trajectory(&time_points);
+    let t_points = calculate_t_points();
+    let d_points = calculate_derivative_points(&t_points);
+    let points_of_trajectory = calculate_points_of_trajectory(&t_points);
     // ros_info!("{:#?}", points_of_trajectory);
 
     let rate = rosrust::rate(100.0);
-    for point in &points_of_trajectory {
+    // for point in &points_of_trajectory {
+    //     pub_theor_trajectory
+    //         .send(geometry_msgs::Vector3 {
+    //             x: point.0,
+    //             y: point.1,
+    //             z: 0.0,
+    //         })
+    //         .unwrap();
+    //     rate.sleep();
+    // }
+
+    for point in &d_points {
         pub_theor_trajectory
             .send(geometry_msgs::Vector3 {
                 x: point.0,
@@ -53,7 +64,7 @@ fn main() {
         rate.sleep();
     }
 
-    let dt = 0.05;
+    let dt = 0.25;
     let (v, w) = calculate_velocities(&points_of_trajectory, dt);
 
     let max_lin_velocity = v.iter().copied().fold(f64::NEG_INFINITY, f64::max);
@@ -121,28 +132,74 @@ fn main() {
         // cmd_vel_rate.sleep();
         rosrust::sleep(duration);
     }
+
+    cmd_vel_pub.send(geometry_msgs::Twist {
+        linear: geometry_msgs::Vector3::default(),
+        angular: geometry_msgs::Vector3::default()
+    }).unwrap();
 }
 
-fn calculate_time_points() -> Vec<f64> {
-    let mut time_points = vec![0.0];
+fn calculate_t_points() -> Vec<f64> {
+    let mut t_points = vec![0.0];
     let step = PI / (NUMBER_OF_POINTS as f64);
     let mut current_value = step;
     for _ in 1..NUMBER_OF_POINTS {
-        time_points.push(current_value);
+        t_points.push(current_value);
         current_value += step;
     }
-    time_points
+
+    // sum of sin
+    // let mut t_points = vec![];
+    // let a1= 23.55;
+    // let b1= 0.2186;
+    // let c1= 1.579;
+    // let a2= 23.25;
+    // let b2= 0.2487;
+    // let c2= 4.755 ;
+    // let a3= 0.1469;
+    // let b3= 1.11;
+    // let c3= 4.841;
+    // let a4= 0.1867;
+    // let b4= 3.519;
+    // let c4= -1.52;
+
+    // let end_t = 8.0;
+    // for i in 0..NUMBER_OF_POINTS {
+    //     let s = i as f64 / NUMBER_OF_POINTS as f64 * end_t;
+    //     t_points.push(a1*(b1*s+c1).sin() + a2*(b2*s+c2).sin() + a3*(b3*s+c3).sin() + a4*(b4*s+c4).sin());
+    // }
+
+    // 2*PI*sin^2(t)
+    // let mut t_points = vec![];
+    // let end_t = PI;
+    // for i in 0..NUMBER_OF_POINTS {
+    //     let s = i as f64 / NUMBER_OF_POINTS as f64 * end_t;
+    //     t_points.push(2.0 * PI * (s + i as f64 * PI / 2.0).sin().powi(2));
+    // }
+
+    t_points
 }
 
-fn calculate_points_of_trajectory(time_points: &[f64]) -> Vec<(f64, f64)> {
+fn calculate_derivative_points(t_points: &[f64]) -> Vec<(f64, f64)> {
+    let mut d_points = vec![];
+    for point in t_points {
+        d_points.push((
+            4.0 * (2.0 * point).sin() * (2.0 * point).cos(),
+            -3.0 * (3.0 * point).sin()
+        ))
+    }
+    d_points
+}
+
+fn calculate_points_of_trajectory(t_points: &[f64]) -> Vec<(f64, f64)> {
     let k_tr = 1.0;
     let shift = (0.0, -1.0);
     let mut trajectory_points = vec![];
-    for time_point in time_points {
+    for point in t_points {
         // variant 14
         trajectory_points.push((
-            ((2.0 * time_point).sin().powi(2) + shift.0) * k_tr,
-            ((3.0 * time_point).cos() + shift.1) * k_tr,
+            ((2.0 * point).sin().powi(2) + shift.0) * k_tr,
+            ((3.0 * point).cos() + shift.1) * k_tr,
         ));
     }
     trajectory_points
