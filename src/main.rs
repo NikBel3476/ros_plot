@@ -7,7 +7,7 @@ const NUMBER_OF_POINTS: usize = 100;
 const MAX_LINEAR_VELOCIY: f64 = 1.5;
 const MAX_ANGULAR_VELOCITY: f64 = 1.5;
 const THETA_START: f64 = 0.0;
-const WITH_DERIVATIVE: bool = true;
+const USE_DERIVATIVE: bool = true;
 
 static mut LINEAR_VEL_REAL: f64 = 0.0;
 static mut ANGULAR_VEL_REAL: f64 = 0.0;
@@ -66,8 +66,8 @@ fn main() {
     }
 
     let dt = 0.25;
-    let (v, w) = match WITH_DERIVATIVE {
-        true => calcualte_velocities_by_vectors(&points_of_trajectory, dt),
+    let (v, w) = match USE_DERIVATIVE {
+        true => calculate_velocities_using_derivative(&d_points, dt),
         false => calculate_velocities(&points_of_trajectory, dt),
     };
 
@@ -252,7 +252,7 @@ fn remap_angle(value: f64) -> f64 {
     return value;
 }
 
-fn calcualte_velocities_by_vectors(d_points: &[(f64, f64)], dt: f64) -> (Vec<f64>, Vec<f64>) {
+fn calculate_velocities_by_vectors(d_points: &[(f64, f64)], dt: f64) -> (Vec<f64>, Vec<f64>) {
     let mut v = vec![];
     let mut w = vec![];
     let mut prev_dr = None;
@@ -270,6 +270,16 @@ fn calcualte_velocities_by_vectors(d_points: &[(f64, f64)], dt: f64) -> (Vec<f64
         );
 
         prev_dr = Some(dr);
+    }
+    (v, w)
+}
+
+fn calculate_velocities_using_derivative(d_points: &[(f64, f64)], dt: f64) -> (Vec<f64>, Vec<f64>) {
+    let mut v = vec![];
+    let mut w = vec![];
+    for i in 0..NUMBER_OF_POINTS - 1 {
+        v.push((vector2_length(&d_points[i])).abs() / dt);
+        w.push(angle_between_vectors2(&d_points[i], &d_points[i + 1]) / dt);
     }
     (v, w)
 }
