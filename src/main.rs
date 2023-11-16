@@ -3,10 +3,11 @@ use std::f64::consts::PI;
 use rosrust::{ros_info, Publisher};
 use rosrust_msg::{geometry_msgs, nav_msgs::Odometry};
 
-const NUMBER_OF_POINTS: usize = 150;
+const NUMBER_OF_POINTS: usize = 100;
 const MAX_LINEAR_VELOCIY: f64 = 1.5;
 const MAX_ANGULAR_VELOCITY: f64 = 1.5;
 const THETA_START: f64 = 0.0;
+const WITH_DERIVATIVE: bool = true;
 
 static mut LINEAR_VEL_REAL: f64 = 0.0;
 static mut ANGULAR_VEL_REAL: f64 = 0.0;
@@ -65,10 +66,14 @@ fn main() {
     }
 
     let dt = 0.25;
-    let (v, w) = calculate_velocities(&points_of_trajectory, dt);
+    let (v, w) = match WITH_DERIVATIVE {
+        true => calcualte_velocities_by_vectors(&points_of_trajectory, dt),
+        false => calculate_velocities(&points_of_trajectory, dt),
+    };
 
     let max_lin_velocity = v.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     let max_ang_velocity = w.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    ros_info!("MAX_LIN_VELOCITY: {max_lin_velocity}, MAX_ANG_VELOCITY: {max_ang_velocity}");
 
     let coeff_safety = 1.0;
     let k1 = MAX_LINEAR_VELOCIY / max_lin_velocity * coeff_safety;
@@ -133,10 +138,12 @@ fn main() {
         rosrust::sleep(duration);
     }
 
-    cmd_vel_pub.send(geometry_msgs::Twist {
-        linear: geometry_msgs::Vector3::default(),
-        angular: geometry_msgs::Vector3::default()
-    }).unwrap();
+    cmd_vel_pub
+        .send(geometry_msgs::Twist {
+            linear: geometry_msgs::Vector3::default(),
+            angular: geometry_msgs::Vector3::default(),
+        })
+        .unwrap();
 }
 
 fn calculate_t_points() -> Vec<f64> {
@@ -185,7 +192,7 @@ fn calculate_derivative_points(t_points: &[f64]) -> Vec<(f64, f64)> {
     for point in t_points {
         d_points.push((
             4.0 * (2.0 * point).sin() * (2.0 * point).cos(),
-            -3.0 * (3.0 * point).sin()
+            -3.0 * (3.0 * point).sin(),
         ))
     }
     d_points
@@ -243,4 +250,34 @@ fn remap_angle(value: f64) -> f64 {
         return value + 2.0 * PI;
     }
     return value;
+}
+
+fn calcualte_velocities_by_vectors(d_points: &[(f64, f64)], dt: f64) -> (Vec<f64>, Vec<f64>) {
+    let mut v = vec![];
+    let mut w = vec![];
+    let mut prev_dr = None;
+    for i in 0..NUMBER_OF_POINTS - 1 {
+        let dx = d_points[i + 1].0 - d_points[i].0;
+        let dy = d_points[i + 1].1 - d_points[i].1;
+        let dr = (dx, dy);
+        v.push(vector2_length(&dr) / dt);
+
+        w.push(
+            -remap_angle(match prev_dr {
+                Some(prev_dr) => angle_between_vectors2(&prev_dr, &dr),
+                None => angle_between_vectors2(&dr, &(1.0, 0.0)),
+            }) / dt,
+        );
+
+        prev_dr = Some(dr);
+    }
+    (v, w)
+}
+
+fn angle_between_vectors2(v1: &(f64, f64), v2: &(f64, f64)) -> f64 {
+    ((v1.0 * v2.0 + v1.1 * v2.1) / (vector2_length(v1) * vector2_length(v2))).acos()
+}
+
+fn vector2_length(v: &(f64, f64)) -> f64 {
+    (v.0.powi(2) + v.1.powi(2)).sqrt()
 }
