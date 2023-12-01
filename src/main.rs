@@ -168,6 +168,32 @@ fn main() {
         .unwrap();
 }
 
+fn x(t: &f64) -> f64 {
+    (2.0 * t).sin().powi(2)
+}
+
+fn y(t: &f64) -> f64 {
+    (3.0 * t).cos()
+}
+
+fn dx(t: &f64) -> f64 {
+    4.0 * (2.0 * t).sin() * (2.0 * t).cos()
+}
+
+fn dy(t: &f64) -> f64 {
+    -3.0 * (3.0 * t).sin()
+}
+
+fn ddx(t: &f64) -> f64 {
+    8.0 * (2.0 * t).cos().powi(2) - 8.0 * (2.0 * t).sin().powi(2)
+}
+
+fn ddy(t: &f64) -> f64 {
+    -9.0 * (3.0 * t).cos()
+}
+
+// fn velocity_pid(t: &f64) -> f64 {}
+
 fn calculate_t_points() -> Vec<f64> {
     let mut t_points = vec![0.0];
     let step = PI / (NUMBER_OF_POINTS as f64);
@@ -226,10 +252,7 @@ fn calculate_points_of_trajectory(t_points: &[f64]) -> Vec<(f64, f64)> {
     let mut trajectory_points = vec![];
     for point in t_points {
         // variant 14
-        trajectory_points.push((
-            ((2.0 * point).sin().powi(2) + shift.0) * k_tr,
-            ((3.0 * point).cos() + shift.1) * k_tr,
-        ));
+        trajectory_points.push(((x(point) + shift.0) * k_tr, (y(point) + shift.1) * k_tr));
     }
     trajectory_points
 }
