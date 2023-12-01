@@ -3,11 +3,11 @@ use std::f64::consts::PI;
 use rosrust::{ros_info, Publisher};
 use rosrust_msg::{geometry_msgs, nav_msgs::Odometry};
 
-const NUMBER_OF_POINTS: usize = 100;
+const NUMBER_OF_POINTS: usize = 200;
 const MAX_LINEAR_VELOCIY: f64 = 1.5;
 const MAX_ANGULAR_VELOCITY: f64 = 1.5;
-const THETA_START: f64 = 0.0;
-const USE_DERIVATIVE: bool = true;
+const USE_DERIVATIVE: bool = false;
+const VELOCITY_COEFFICIENT: f64 = 0.2;
 
 static mut LINEAR_VEL_REAL: f64 = 0.0;
 static mut ANGULAR_VEL_REAL: f64 = 0.0;
@@ -43,18 +43,7 @@ fn main() {
     // ros_info!("{:#?}", points_of_trajectory);
 
     let rate = rosrust::rate(100.0);
-    // for point in &points_of_trajectory {
-    //     pub_theor_trajectory
-    //         .send(geometry_msgs::Vector3 {
-    //             x: point.0,
-    //             y: point.1,
-    //             z: 0.0,
-    //         })
-    //         .unwrap();
-    //     rate.sleep();
-    // }
-
-    for point in &d_points {
+    for point in &points_of_trajectory {
         pub_theor_trajectory
             .send(geometry_msgs::Vector3 {
                 x: point.0,
@@ -65,14 +54,34 @@ fn main() {
         rate.sleep();
     }
 
-    let dt = 0.25;
+    // for point in &d_points {
+    //     pub_theor_trajectory
+    //         .send(geometry_msgs::Vector3 {
+    //             x: point.0,
+    //             y: point.1,
+    //             z: 0.0,
+    //         })
+    //         .unwrap();
+    //     rate.sleep();
+    // }
+
+    let dt = 0.05;
     let (v, w) = match USE_DERIVATIVE {
         true => calculate_velocities_using_derivative(&d_points, dt),
         false => calculate_velocities(&points_of_trajectory, dt),
     };
+    // ros_info!("{:#?}", w);
 
-    let max_lin_velocity = v.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    let max_ang_velocity = w.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let max_lin_velocity = v
+        .iter()
+        .copied()
+        .map(|velocity| velocity.abs())
+        .fold(f64::NEG_INFINITY, f64::max);
+    let max_ang_velocity = w
+        .iter()
+        .copied()
+        .map(|velocity| velocity.abs())
+        .fold(f64::NEG_INFINITY, f64::max);
     ros_info!("MAX_LIN_VELOCITY: {max_lin_velocity}, MAX_ANG_VELOCITY: {max_ang_velocity}");
 
     let coeff_safety = 1.0;
@@ -80,7 +89,16 @@ fn main() {
     let k2 = MAX_ANGULAR_VELOCITY / max_ang_velocity * coeff_safety;
     let k = k1.min(k2).clamp(0.1, coeff_safety);
 
-    for (i, velocity) in v.iter().enumerate() {
+    let linear_velocities: Vec<f64> = v
+        .iter()
+        .map(|velocity| velocity * VELOCITY_COEFFICIENT)
+        .collect();
+    let angular_velocities: Vec<f64> = w
+        .iter()
+        .map(|velocity| velocity * VELOCITY_COEFFICIENT)
+        .collect();
+
+    for (i, velocity) in linear_velocities.iter().enumerate() {
         pub_theor_lin_vel
             .send(geometry_msgs::Vector3 {
                 x: i as f64,
@@ -91,7 +109,7 @@ fn main() {
         rate.sleep();
     }
 
-    for (i, velocity) in w.iter().enumerate() {
+    for (i, velocity) in angular_velocities.iter().enumerate() {
         pub_theor_ang_vel
             .send(geometry_msgs::Vector3 {
                 x: i as f64,
@@ -102,8 +120,12 @@ fn main() {
         rate.sleep();
     }
 
-    let duration = rosrust::Duration::from_nanos((dt * 1E9) as i64);
-    for (i, velocity) in v.iter().zip(&w).enumerate() {
+    let duration = rosrust::Duration::from_nanos((dt / VELOCITY_COEFFICIENT * 1E9) as i64);
+    for (i, velocity) in linear_velocities
+        .iter()
+        .zip(&angular_velocities)
+        .enumerate()
+    {
         unsafe {
             pub_real_lin_vel
                 .send(geometry_msgs::Vector3 {
@@ -228,7 +250,8 @@ fn calculate_velocities(points: &[(f64, f64)], dt: f64) -> (Vec<f64>, Vec<f64>) 
         }
 
         dw.push(if i == 0 {
-            theta[i] - THETA_START
+            // theta[i]
+            0.0
         } else {
             theta[i] - theta[i - 1]
         });
