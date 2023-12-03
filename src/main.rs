@@ -1,16 +1,25 @@
-use std::f64::consts::PI;
-
+use once_cell::sync::Lazy;
 use rosrust::{ros_info, Publisher};
-use rosrust_msg::{geometry_msgs, nav_msgs::Odometry};
+use rosrust_msg::{geometry_msgs, geometry_msgs::PoseWithCovariance, nav_msgs::Odometry};
+use std::cmp::Ordering;
+use std::f64::consts::PI;
+use std::sync::Mutex;
 
 const NUMBER_OF_POINTS: usize = 200;
 const MAX_LINEAR_VELOCIY: f64 = 1.5;
 const MAX_ANGULAR_VELOCITY: f64 = 1.5;
 const USE_DERIVATIVE: bool = false;
 const VELOCITY_COEFFICIENT: f64 = 0.2;
+const SHIFT: (f64, f64) = (0.0, -1.0);
+const K_D: f64 = 2.0;
+const K_P: f64 = 1.0;
 
 static mut LINEAR_VEL_REAL: f64 = 0.0;
 static mut ANGULAR_VEL_REAL: f64 = 0.0;
+static CURRENT_POSE: Lazy<Mutex<geometry_msgs::PoseWithCovariance>> =
+    Lazy::new(|| Mutex::new(Default::default()));
+static CURRENT_TWIST: Lazy<Mutex<geometry_msgs::TwistWithCovariance>> =
+    Lazy::new(|| Mutex::new(Default::default()));
 
 fn main() {
     env_logger::init();
@@ -22,18 +31,22 @@ fn main() {
     cmd_vel_pub.wait_for_subscribers(None).unwrap();
     let pub_theor_trajectory = rosrust::publish("theor_trajectory", 10).unwrap();
     pub_theor_trajectory.wait_for_subscribers(None).unwrap();
-    let pub_theor_lin_vel = rosrust::publish("theor_lin_vel", 10).unwrap();
-    pub_theor_lin_vel.wait_for_subscribers(None).unwrap();
-    let pub_theor_ang_vel = rosrust::publish("theor_ang_vel", 10).unwrap();
-    pub_theor_ang_vel.wait_for_subscribers(None).unwrap();
-    let pub_real_lin_vel = rosrust::publish("real_lin_vel", 10).unwrap();
-    pub_real_lin_vel.wait_for_subscribers(None).unwrap();
-    let pub_real_ang_vel = rosrust::publish("real_ang_vel", 10).unwrap();
-    pub_real_ang_vel.wait_for_subscribers(None).unwrap();
+    // let pub_theor_lin_vel = rosrust::publish("theor_lin_vel", 10).unwrap();
+    // pub_theor_lin_vel.wait_for_subscribers(None).unwrap();
+    // let pub_theor_ang_vel = rosrust::publish("theor_ang_vel", 10).unwrap();
+    // pub_theor_ang_vel.wait_for_subscribers(None).unwrap();
+    // let pub_real_lin_vel = rosrust::publish("real_lin_vel", 10).unwrap();
+    // pub_real_lin_vel.wait_for_subscribers(None).unwrap();
+    // let pub_real_ang_vel = rosrust::publish("real_ang_vel", 10).unwrap();
+    // pub_real_ang_vel.wait_for_subscribers(None).unwrap();
 
     let odom_sub = rosrust::subscribe("odom", 10, |odometry: Odometry| unsafe {
         LINEAR_VEL_REAL = odometry.twist.twist.linear.x;
         ANGULAR_VEL_REAL = odometry.twist.twist.angular.z;
+        let mut pose = CURRENT_POSE.lock().unwrap();
+        *pose = odometry.pose;
+        let mut twist = CURRENT_TWIST.lock().unwrap();
+        *twist = odometry.twist;
     })
     .unwrap();
 
@@ -65,100 +78,147 @@ fn main() {
     //     rate.sleep();
     // }
 
+    // let dt = 0.05;
+    // let (v, w) = match USE_DERIVATIVE {
+    //     true => calculate_velocities_using_derivative(&d_points, dt),
+    //     false => calculate_velocities(&points_of_trajectory, dt),
+    // };
+    // // ros_info!("{:#?}", w);
+
+    // let max_lin_velocity = v
+    //     .iter()
+    //     .copied()
+    //     .map(|velocity| velocity.abs())
+    //     .fold(f64::NEG_INFINITY, f64::max);
+    // let max_ang_velocity = w
+    //     .iter()
+    //     .copied()
+    //     .map(|velocity| velocity.abs())
+    //     .fold(f64::NEG_INFINITY, f64::max);
+    // ros_info!("MAX_LIN_VELOCITY: {max_lin_velocity}, MAX_ANG_VELOCITY: {max_ang_velocity}");
+
+    // let coeff_safety = 1.0;
+    // let k1 = MAX_LINEAR_VELOCIY / max_lin_velocity * coeff_safety;
+    // let k2 = MAX_ANGULAR_VELOCITY / max_ang_velocity * coeff_safety;
+    // let k = k1.min(k2).clamp(0.1, coeff_safety);
+
+    // let linear_velocities: Vec<f64> = v
+    //     .iter()
+    //     .map(|velocity| velocity * VELOCITY_COEFFICIENT)
+    //     .collect();
+    // let angular_velocities: Vec<f64> = w
+    //     .iter()
+    //     .map(|velocity| velocity * VELOCITY_COEFFICIENT)
+    //     .collect();
+
+    // for (i, velocity) in linear_velocities.iter().enumerate() {
+    //     pub_theor_lin_vel
+    //         .send(geometry_msgs::Vector3 {
+    //             x: i as f64,
+    //             y: velocity.clone(),
+    //             z: 0.0,
+    //         })
+    //         .unwrap();
+    //     rate.sleep();
+    // }
+
+    // for (i, velocity) in angular_velocities.iter().enumerate() {
+    //     pub_theor_ang_vel
+    //         .send(geometry_msgs::Vector3 {
+    //             x: i as f64,
+    //             y: velocity.clone(),
+    //             z: 0.0,
+    //         })
+    //         .unwrap();
+    //     rate.sleep();
+    // }
+
+    // let pose = (*CURRENT_POSE.lock().unwrap()).clone();
+    // ros_info!("{:#?}", pose);
+
     let dt = 0.05;
-    let (v, w) = match USE_DERIVATIVE {
-        true => calculate_velocities_using_derivative(&d_points, dt),
-        false => calculate_velocities(&points_of_trajectory, dt),
-    };
-    // ros_info!("{:#?}", w);
-
-    let max_lin_velocity = v
-        .iter()
-        .copied()
-        .map(|velocity| velocity.abs())
-        .fold(f64::NEG_INFINITY, f64::max);
-    let max_ang_velocity = w
-        .iter()
-        .copied()
-        .map(|velocity| velocity.abs())
-        .fold(f64::NEG_INFINITY, f64::max);
-    ros_info!("MAX_LIN_VELOCITY: {max_lin_velocity}, MAX_ANG_VELOCITY: {max_ang_velocity}");
-
-    let coeff_safety = 1.0;
-    let k1 = MAX_LINEAR_VELOCIY / max_lin_velocity * coeff_safety;
-    let k2 = MAX_ANGULAR_VELOCITY / max_ang_velocity * coeff_safety;
-    let k = k1.min(k2).clamp(0.1, coeff_safety);
-
-    let linear_velocities: Vec<f64> = v
-        .iter()
-        .map(|velocity| velocity * VELOCITY_COEFFICIENT)
-        .collect();
-    let angular_velocities: Vec<f64> = w
-        .iter()
-        .map(|velocity| velocity * VELOCITY_COEFFICIENT)
-        .collect();
-
-    for (i, velocity) in linear_velocities.iter().enumerate() {
-        pub_theor_lin_vel
-            .send(geometry_msgs::Vector3 {
-                x: i as f64,
-                y: velocity.clone(),
-                z: 0.0,
-            })
-            .unwrap();
-        rate.sleep();
-    }
-
-    for (i, velocity) in angular_velocities.iter().enumerate() {
-        pub_theor_ang_vel
-            .send(geometry_msgs::Vector3 {
-                x: i as f64,
-                y: velocity.clone(),
-                z: 0.0,
-            })
-            .unwrap();
-        rate.sleep();
-    }
-
-    let duration = rosrust::Duration::from_nanos((dt / VELOCITY_COEFFICIENT * 1E9) as i64);
-    for (i, velocity) in linear_velocities
-        .iter()
-        .zip(&angular_velocities)
-        .enumerate()
-    {
-        unsafe {
-            pub_real_lin_vel
-                .send(geometry_msgs::Vector3 {
-                    x: i as f64,
-                    y: LINEAR_VEL_REAL,
-                    z: 0.0,
-                })
-                .unwrap();
-            pub_real_ang_vel
-                .send(geometry_msgs::Vector3 {
-                    x: i as f64,
-                    y: ANGULAR_VEL_REAL,
-                    z: 0.0,
-                })
-                .unwrap();
-        }
+    let duration = rosrust::Duration::from_nanos((dt * 1E9) as i64);
+    let mut time_accumulator = 0.0;
+    let mut v = 0.0;
+    let mut w = 0.0;
+    let mut a = 0.0;
+    let mut time_real = rosrust::now().seconds();
+    while time_accumulator < PI {
         cmd_vel_pub
             .send(geometry_msgs::Twist {
                 linear: geometry_msgs::Vector3 {
-                    x: velocity.0.clone(),
+                    x: v,
                     y: 0.0,
                     z: 0.0,
                 },
                 angular: geometry_msgs::Vector3 {
                     x: 0.0,
                     y: 0.0,
-                    z: velocity.1.clone(),
+                    z: w,
                 },
             })
             .unwrap();
-        // cmd_vel_rate.sleep();
         rosrust::sleep(duration);
+
+        let twist = (*CURRENT_TWIST).lock().unwrap().clone();
+        let robot_velocity = twist.twist.linear.x;
+        let pose = (*CURRENT_POSE).lock().unwrap().clone();
+        let robot_angle = get_robot_angle();
+        (a, w) = velocity_pid(
+            &time_accumulator,
+            &pose.pose.position.x,
+            &pose.pose.position.y,
+            &robot_velocity,
+            &robot_angle,
+        );
+        // let new_time_real = rosrust::now().seconds();
+        // let dt_real = new_time_real - time_real;
+        // v = v + a * dt_real;
+        v = v + a * dt;
+        ros_info!("a: {a}, w: {w}, dt: {dt}, ta: {time_accumulator}");
+        time_accumulator += dt;
+        // time_real = new_time_real;
     }
+
+    // let duration = rosrust::Duration::from_nanos((dt / VELOCITY_COEFFICIENT * 1E9) as i64);
+    // for (i, velocity) in linear_velocities
+    //     .iter()
+    //     .zip(&angular_velocities)
+    //     .enumerate()
+    // {
+    //     unsafe {
+    //         pub_real_lin_vel
+    //             .send(geometry_msgs::Vector3 {
+    //                 x: i as f64,
+    //                 y: LINEAR_VEL_REAL,
+    //                 z: 0.0,
+    //             })
+    //             .unwrap();
+    //         pub_real_ang_vel
+    //             .send(geometry_msgs::Vector3 {
+    //                 x: i as f64,
+    //                 y: ANGULAR_VEL_REAL,
+    //                 z: 0.0,
+    //             })
+    //             .unwrap();
+    //     }
+    //     cmd_vel_pub
+    //         .send(geometry_msgs::Twist {
+    //             linear: geometry_msgs::Vector3 {
+    //                 x: velocity.0.clone(),
+    //                 y: 0.0,
+    //                 z: 0.0,
+    //             },
+    //             angular: geometry_msgs::Vector3 {
+    //                 x: 0.0,
+    //                 y: 0.0,
+    //                 z: velocity.1.clone(),
+    //             },
+    //         })
+    //         .unwrap();
+    //     // cmd_vel_rate.sleep();
+    //     rosrust::sleep(duration);
+    // }
 
     cmd_vel_pub
         .send(geometry_msgs::Twist {
@@ -168,31 +228,45 @@ fn main() {
         .unwrap();
 }
 
-fn x(t: &f64) -> f64 {
-    (2.0 * t).sin().powi(2)
+fn f(t: &f64) -> f64 {
+    (2.0 * t).sin().powi(2) + SHIFT.0
 }
 
-fn y(t: &f64) -> f64 {
-    (3.0 * t).cos()
+fn g(t: &f64) -> f64 {
+    (3.0 * t).cos() + SHIFT.1
 }
 
-fn dx(t: &f64) -> f64 {
+fn df(t: &f64) -> f64 {
     4.0 * (2.0 * t).sin() * (2.0 * t).cos()
 }
 
-fn dy(t: &f64) -> f64 {
+fn dg(t: &f64) -> f64 {
     -3.0 * (3.0 * t).sin()
 }
 
-fn ddx(t: &f64) -> f64 {
+fn ddf(t: &f64) -> f64 {
     8.0 * (2.0 * t).cos().powi(2) - 8.0 * (2.0 * t).sin().powi(2)
 }
 
-fn ddy(t: &f64) -> f64 {
+fn ddg(t: &f64) -> f64 {
     -9.0 * (3.0 * t).cos()
 }
 
-// fn velocity_pid(t: &f64) -> f64 {}
+fn velocity_pid(t: &f64, x: &f64, y: &f64, v: &f64, a: &f64) -> (f64, f64) {
+    let linear_acceleration = a.cos() * (ddf(t) + K_D * (df(t) - x_dot(v, a)) + K_P * (f(t) - x))
+        + a.sin() * (ddg(t) + K_D * (dg(t) - y_dot(v, a)) + K_P * (g(t) - y));
+    let angular_velocity = -a.sin() * (ddf(t) + K_D * (df(t) - x_dot(v, a)) + K_P * (f(t) - x)) / v
+        + a.cos() * (ddg(t) + K_D * (dg(t) - y_dot(v, a)) + K_P * (g(t) - y)) / v;
+    (linear_acceleration, angular_velocity)
+}
+
+fn x_dot(v: &f64, a: &f64) -> f64 {
+    v * a.cos()
+}
+
+fn y_dot(v: &f64, a: &f64) -> f64 {
+    v * a.sin()
+}
 
 fn calculate_t_points() -> Vec<f64> {
     let mut t_points = vec![0.0];
@@ -248,11 +322,10 @@ fn calculate_derivative_points(t_points: &[f64]) -> Vec<(f64, f64)> {
 
 fn calculate_points_of_trajectory(t_points: &[f64]) -> Vec<(f64, f64)> {
     let k_tr = 1.0;
-    let shift = (0.0, -1.0);
     let mut trajectory_points = vec![];
     for point in t_points {
         // variant 14
-        trajectory_points.push(((x(point) + shift.0) * k_tr, (y(point) + shift.1) * k_tr));
+        trajectory_points.push((f(point) * k_tr, g(point) * k_tr));
     }
     trajectory_points
 }
@@ -336,4 +409,25 @@ fn angle_between_vectors2(v1: &(f64, f64), v2: &(f64, f64)) -> f64 {
 
 fn vector2_length(v: &(f64, f64)) -> f64 {
     (v.0.powi(2) + v.1.powi(2)).sqrt()
+}
+
+fn get_robot_angle() -> f64 {
+    let pose = (*CURRENT_POSE.lock().unwrap()).clone();
+    get_angle_from_pose(&pose)
+}
+
+fn get_angle_from_pose(pose: &PoseWithCovariance) -> f64 {
+    remap_angle(
+        // (pose.pose.orientation.z.atan2(pose.pose.orientation.w) * 2.0 * 180.0 / PI).to_radians()
+        pose.pose.orientation.z.atan2(pose.pose.orientation.w) * 2.0,
+    )
+    // let mut angle =
+    //     (pose.pose.orientation.z.atan2(pose.pose.orientation.w) * 2.0 * 180.0 / PI).to_radians();
+    // match angle.total_cmp(&PI) {
+    //     Ordering::Greater => angle - 2.0 * PI,
+    //     _ => match angle.total_cmp(&(-PI)) {
+    //         Ordering::Less => angle + 2.0 * PI,
+    //         _ => angle,
+    //     },
+    // }
 }

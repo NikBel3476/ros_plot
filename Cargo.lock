@@ -981,6 +981,7 @@ name = "ros_plot"
 version = "0.1.0"
 dependencies = [
  "env_logger",
+ "once_cell",
  "rosrust",
  "rosrust_msg",
 ]
