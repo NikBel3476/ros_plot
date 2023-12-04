@@ -147,14 +147,14 @@ fn main() {
         cmd_vel_pub
             .send(geometry_msgs::Twist {
                 linear: geometry_msgs::Vector3 {
-                    x: v * dt * 20.0,
+                    x: v,
                     y: 0.0,
                     z: 0.0,
                 },
                 angular: geometry_msgs::Vector3 {
                     x: 0.0,
                     y: 0.0,
-                    z: w * dt * 20.0,
+                    z: w * dt,
                 },
             })
             .unwrap();
@@ -174,8 +174,18 @@ fn main() {
         let new_time_real = rosrust::now().seconds();
         let dt_real = new_time_real - time_real;
         v += a * dt_real;
-        ros_info!("a: {a}, w: {w}, dt: {dt_real}, ta: {time_accumulator}");
-        time_accumulator += dt;
+        ros_info!(
+            "a: {:.6}, v: {:.6}, w: {:.6}, dt: {:.6}, ta: {:.6}, x: {:.6}, y: {:.6}, ang: {:.6}",
+            a,
+            v,
+            w,
+            dt_real,
+            time_accumulator,
+            pose.pose.position.x,
+            pose.pose.position.y,
+            robot_angle
+        );
+        time_accumulator += dt_real;
         time_real = new_time_real;
     }
 
@@ -244,7 +254,7 @@ fn dg(t: &f64) -> f64 {
 }
 
 fn ddf(t: &f64) -> f64 {
-    8.0 * (2.0 * t).cos().powi(2) - 8.0 * (2.0 * t).sin().powi(2)
+    8.0 * ((2.0 * t).cos().powi(2) - (2.0 * t).sin().powi(2))
 }
 
 fn ddg(t: &f64) -> f64 {
@@ -252,10 +262,15 @@ fn ddg(t: &f64) -> f64 {
 }
 
 fn velocity_pid(t: &f64, x: &f64, y: &f64, v: &f64, a: &f64) -> (f64, f64) {
+    // let linear_acceleration = a.cos() * (ddf(t) + K_D * (df(t) - x_dot(v, a)) + K_P * (f(t) - x))
+    //     + a.sin() * (ddg(t) + K_D * (dg(t) - y_dot(v, a)) + K_P * (g(t) - y));
+    // let angular_velocity = -a.sin() * (ddf(t) + K_D * (df(t) - x_dot(v, a)) + K_P * (f(t) - x)) / v
+    //     + a.cos() * (ddg(t) + K_D * (dg(t) - y_dot(v, a)) + K_P * (g(t) - y)) / v;
     let linear_acceleration = a.cos() * (ddf(t) + K_D * (df(t) - x_dot(v, a)) + K_P * (f(t) - x))
-        + a.sin() * (ddg(t) + K_D * (dg(t) - y_dot(v, a)) + K_P * (g(t) - y));
-    let angular_velocity = -a.sin() * (ddf(t) + K_D * (df(t) - x_dot(v, a)) + K_P * (f(t) - x)) / v
+        + a.sin() * (ddg(t) + K_D * (dg(t) - y_dot(v, a)) + K_P * (g(t) - y)) / v;
+    let angular_velocity = -a.sin() * (ddf(t) + K_D * (df(t) - x_dot(v, a)) + K_P * (f(t) - x))
         + a.cos() * (ddg(t) + K_D * (dg(t) - y_dot(v, a)) + K_P * (g(t) - y)) / v;
+
     (linear_acceleration, angular_velocity)
 }
 
