@@ -136,7 +136,7 @@ fn main() {
     // let pose = (*CURRENT_POSE.lock().unwrap()).clone();
     // ros_info!("{:#?}", pose);
 
-    let dt = 0.05;
+    let dt = 0.0001;
     let duration = rosrust::Duration::from_nanos((dt * 1E9) as i64);
     let mut time_accumulator = 0.0;
     let mut v = 0.0;
@@ -147,14 +147,14 @@ fn main() {
         cmd_vel_pub
             .send(geometry_msgs::Twist {
                 linear: geometry_msgs::Vector3 {
-                    x: v,
+                    x: v * dt * 20.0,
                     y: 0.0,
                     z: 0.0,
                 },
                 angular: geometry_msgs::Vector3 {
                     x: 0.0,
                     y: 0.0,
-                    z: w,
+                    z: w * dt * 20.0,
                 },
             })
             .unwrap();
@@ -171,13 +171,12 @@ fn main() {
             &robot_velocity,
             &robot_angle,
         );
-        // let new_time_real = rosrust::now().seconds();
-        // let dt_real = new_time_real - time_real;
-        // v = v + a * dt_real;
-        v = v + a * dt;
-        ros_info!("a: {a}, w: {w}, dt: {dt}, ta: {time_accumulator}");
+        let new_time_real = rosrust::now().seconds();
+        let dt_real = new_time_real - time_real;
+        v += a * dt_real;
+        ros_info!("a: {a}, w: {w}, dt: {dt_real}, ta: {time_accumulator}");
         time_accumulator += dt;
-        // time_real = new_time_real;
+        time_real = new_time_real;
     }
 
     // let duration = rosrust::Duration::from_nanos((dt / VELOCITY_COEFFICIENT * 1E9) as i64);
@@ -418,8 +417,7 @@ fn get_robot_angle() -> f64 {
 
 fn get_angle_from_pose(pose: &PoseWithCovariance) -> f64 {
     remap_angle(
-        // (pose.pose.orientation.z.atan2(pose.pose.orientation.w) * 2.0 * 180.0 / PI).to_radians()
-        pose.pose.orientation.z.atan2(pose.pose.orientation.w) * 2.0,
+        (pose.pose.orientation.z.atan2(pose.pose.orientation.w) * 2.0 * 180.0 / PI).to_radians(), // pose.pose.orientation.z.atan2(pose.pose.orientation.w) * 2.0,
     )
     // let mut angle =
     //     (pose.pose.orientation.z.atan2(pose.pose.orientation.w) * 2.0 * 180.0 / PI).to_radians();
