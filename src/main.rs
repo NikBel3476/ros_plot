@@ -137,7 +137,7 @@ fn main() {
     // let pose = (*CURRENT_POSE.lock().unwrap()).clone();
     // ros_info!("{:#?}", pose);
 
-    let dt = 0.01;
+    let dt = 0.05;
     let duration = rosrust::Duration::from_nanos((dt * 1E9) as i64);
     let mut w = 0.0;
     let mut a = 0.0;
@@ -145,8 +145,8 @@ fn main() {
     let mut time_real_prev = 0.0;
     let mut v_control = 0.0;
     let mut old_v_control = 0.0;
-    let mut time_accumulator = 0.0;
-    while time_accumulator < PI / TIME_COEFFICIENT {
+    let mut time_real = 0.0;
+    while time_real < PI / TIME_COEFFICIENT {
         cmd_vel_pub
             .send(geometry_msgs::Twist {
                 linear: geometry_msgs::Vector3 {
@@ -168,18 +168,17 @@ fn main() {
         let pose = (*CURRENT_POSE).lock().unwrap().clone();
         let robot_angle = get_robot_angle();
         (a, w) = velocity_pid(
-            &(time_accumulator),
+            &(time_real),
             &pose.pose.position.x,
             &pose.pose.position.y,
             &robot_velocity,
             &robot_angle,
         );
-        let time_real = rosrust::now().seconds() - start_time;
+        time_real = rosrust::now().seconds() - start_time;
         let dt_real = time_real - time_real_prev;
         time_real_prev = time_real;
 
         v_control = old_v_control + a * dt_real;
-        time_accumulator += dt_real;
         old_v_control = v_control;
         ros_info!(
             "a: {:.6}, v: {:.6}, w: {:.6}, dt: {:.6}, ta: {:.6}, x: {:.6}, y: {:.6}, ang: {:.6}",
