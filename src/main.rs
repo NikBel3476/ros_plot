@@ -13,6 +13,7 @@ const VELOCITY_COEFFICIENT: f64 = 0.2;
 const SHIFT: (f64, f64) = (0.0, -1.0);
 const K_D: f64 = 2.0;
 const K_P: f64 = 1.0;
+const TIME_COEFFICIENT: f64 = 0.25;
 
 static mut LINEAR_VEL_REAL: f64 = 0.0;
 static mut ANGULAR_VEL_REAL: f64 = 0.0;
@@ -136,25 +137,27 @@ fn main() {
     // let pose = (*CURRENT_POSE.lock().unwrap()).clone();
     // ros_info!("{:#?}", pose);
 
-    let dt = 0.0001;
+    let dt = 0.01;
     let duration = rosrust::Duration::from_nanos((dt * 1E9) as i64);
-    let mut time_accumulator = 0.0;
-    let mut v = 0.0;
     let mut w = 0.0;
     let mut a = 0.0;
-    let mut time_real = rosrust::now().seconds();
-    while time_accumulator < PI {
+    let start_time = rosrust::now().seconds();
+    let mut time_real_prev = 0.0;
+    let mut v_control = 0.0;
+    let mut old_v_control = 0.0;
+    let mut time_accumulator = 0.0;
+    while time_accumulator < PI / TIME_COEFFICIENT {
         cmd_vel_pub
             .send(geometry_msgs::Twist {
                 linear: geometry_msgs::Vector3 {
-                    x: v,
+                    x: v_control,
                     y: 0.0,
                     z: 0.0,
                 },
                 angular: geometry_msgs::Vector3 {
                     x: 0.0,
                     y: 0.0,
-                    z: w * dt,
+                    z: w,
                 },
             })
             .unwrap();
@@ -165,28 +168,30 @@ fn main() {
         let pose = (*CURRENT_POSE).lock().unwrap().clone();
         let robot_angle = get_robot_angle();
         (a, w) = velocity_pid(
-            &time_accumulator,
+            &(time_accumulator),
             &pose.pose.position.x,
             &pose.pose.position.y,
             &robot_velocity,
             &robot_angle,
         );
-        let new_time_real = rosrust::now().seconds();
-        let dt_real = new_time_real - time_real;
-        v += a * dt_real;
+        let time_real = rosrust::now().seconds() - start_time;
+        let dt_real = time_real - time_real_prev;
+        time_real_prev = time_real;
+
+        v_control = old_v_control + a * dt_real;
+        time_accumulator += dt_real;
+        old_v_control = v_control;
         ros_info!(
             "a: {:.6}, v: {:.6}, w: {:.6}, dt: {:.6}, ta: {:.6}, x: {:.6}, y: {:.6}, ang: {:.6}",
             a,
-            v,
+            v_control,
             w,
             dt_real,
-            time_accumulator,
+            time_real,
             pose.pose.position.x,
             pose.pose.position.y,
             robot_angle
         );
-        time_accumulator += dt_real;
-        time_real = new_time_real;
     }
 
     // let duration = rosrust::Duration::from_nanos((dt / VELOCITY_COEFFICIENT * 1E9) as i64);
@@ -238,38 +243,38 @@ fn main() {
 }
 
 fn f(t: &f64) -> f64 {
-    (2.0 * t).sin().powi(2) + SHIFT.0
+    // (2.0 * t).sin().powi(2) + SHIFT.0
+    (2.0 * t * TIME_COEFFICIENT).sin().powi(2) + SHIFT.0
 }
 
 fn g(t: &f64) -> f64 {
-    (3.0 * t).cos() + SHIFT.1
+    // (3.0 * t).cos() + SHIFT.1
+    (3.0 * t * TIME_COEFFICIENT).cos() + SHIFT.1
 }
 
 fn df(t: &f64) -> f64 {
-    4.0 * (2.0 * t).sin() * (2.0 * t).cos()
+    TIME_COEFFICIENT * 4.0 * (2.0 * t * TIME_COEFFICIENT).sin() * (2.0 * t * TIME_COEFFICIENT).cos()
 }
 
 fn dg(t: &f64) -> f64 {
-    -3.0 * (3.0 * t).sin()
+    TIME_COEFFICIENT * -3.0 * (3.0 * t * TIME_COEFFICIENT).sin()
 }
 
 fn ddf(t: &f64) -> f64 {
-    8.0 * ((2.0 * t).cos().powi(2) - (2.0 * t).sin().powi(2))
+    TIME_COEFFICIENT.powi(2)
+        * 8.0
+        * ((2.0 * t * TIME_COEFFICIENT).cos().powi(2) - (2.0 * t * TIME_COEFFICIENT).sin().powi(2))
 }
 
 fn ddg(t: &f64) -> f64 {
-    -9.0 * (3.0 * t).cos()
+    TIME_COEFFICIENT.powi(2) * -9.0 * (3.0 * t * TIME_COEFFICIENT).cos()
 }
 
 fn velocity_pid(t: &f64, x: &f64, y: &f64, v: &f64, a: &f64) -> (f64, f64) {
-    // let linear_acceleration = a.cos() * (ddf(t) + K_D * (df(t) - x_dot(v, a)) + K_P * (f(t) - x))
-    //     + a.sin() * (ddg(t) + K_D * (dg(t) - y_dot(v, a)) + K_P * (g(t) - y));
-    // let angular_velocity = -a.sin() * (ddf(t) + K_D * (df(t) - x_dot(v, a)) + K_P * (f(t) - x)) / v
-    //     + a.cos() * (ddg(t) + K_D * (dg(t) - y_dot(v, a)) + K_P * (g(t) - y)) / v;
-    let linear_acceleration = a.cos() * (ddf(t) + K_D * (df(t) - x_dot(v, a)) + K_P * (f(t) - x))
-        + a.sin() * (ddg(t) + K_D * (dg(t) - y_dot(v, a)) + K_P * (g(t) - y)) / v;
-    let angular_velocity = -a.sin() * (ddf(t) + K_D * (df(t) - x_dot(v, a)) + K_P * (f(t) - x))
-        + a.cos() * (ddg(t) + K_D * (dg(t) - y_dot(v, a)) + K_P * (g(t) - y)) / v;
+    let control_x = ddf(t) + K_D * (df(t) - x_dot(v, a)) + K_P * (f(t) - x);
+    let control_y = ddg(t) + K_D * (dg(t) - y_dot(v, a)) + K_P * (g(t) - y);
+    let linear_acceleration = a.cos() * control_x + a.sin() * control_y;
+    let angular_velocity = -a.sin() / v * control_x + a.cos() / v * control_y;
 
     (linear_acceleration, angular_velocity)
 }
@@ -284,7 +289,7 @@ fn y_dot(v: &f64, a: &f64) -> f64 {
 
 fn calculate_t_points() -> Vec<f64> {
     let mut t_points = vec![0.0];
-    let step = PI / (NUMBER_OF_POINTS as f64);
+    let step = PI / TIME_COEFFICIENT / (NUMBER_OF_POINTS as f64);
     let mut current_value = step;
     for _ in 1..NUMBER_OF_POINTS {
         t_points.push(current_value);
