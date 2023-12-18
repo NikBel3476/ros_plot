@@ -389,6 +389,6 @@ fn get_robot_angle() -> f64 {
 
 fn get_angle_from_pose(pose: &PoseWithCovariance) -> f64 {
     remap_angle(
-        (pose.pose.orientation.z.atan2(pose.pose.orientation.w) * 2.0 * 180.0 / PI).to_radians(), // pose.pose.orientation.z.atan2(pose.pose.orientation.w) * 2.0,
+        (pose.pose.orientation.z.atan2(pose.pose.orientation.w) * 2.0 * 180.0 / PI).to_radians(),
     )
 }
