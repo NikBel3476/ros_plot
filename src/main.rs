@@ -4,7 +4,7 @@ use rosrust_msg::{geometry_msgs, geometry_msgs::PoseWithCovariance, nav_msgs::Od
 use std::f64::consts::PI;
 use std::sync::Mutex;
 
-const NUMBER_OF_POINTS: usize = 500;
+const NUMBER_OF_POINTS: usize = 125;
 const VELOCITY_COEFFICIENT: f64 = 1.0;
 const SHIFT: (f64, f64) = (0.0, -1.0);
 const K_D: f64 = 2.0;
@@ -19,7 +19,7 @@ static CURRENT_POSE: Lazy<Mutex<geometry_msgs::PoseWithCovariance>> =
 static CURRENT_TWIST: Lazy<Mutex<geometry_msgs::TwistWithCovariance>> =
     Lazy::new(|| Mutex::new(Default::default()));
 
-const USE_PID: bool = false;
+const USE_PID: bool = true;
 
 fn main() {
     match USE_PID {
@@ -127,9 +127,8 @@ fn run_without_feedback() {
     let dy = points_of_trajectory[1].1 - points_of_trajectory[0].1;
     let angle_to_rotate = dy.atan2(dx);
     let time_to_rotation = angle_to_rotate.abs() * 5.0;
-    let duration = rosrust::Duration::from_nanos((time_to_rotation * 1E9) as i64);
+    let duration = rosrust::Duration::from_nanos((time_to_rotation * 1E9 * 1.3) as i64); // increase duration by 30%
     let dw = angle_to_rotate / time_to_rotation;
-    ros_info!("angle to rotate: {angle_to_rotate}, dw: {dw}");
     cmd_vel_pub
         .send(geometry_msgs::Twist {
             linear: Default::default(),
