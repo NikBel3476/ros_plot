@@ -4,12 +4,13 @@ use rosrust_msg::{geometry_msgs, geometry_msgs::PoseWithCovariance, nav_msgs::Od
 use std::f64::consts::PI;
 use std::sync::Mutex;
 
-const NUMBER_OF_POINTS: usize = 200;
-const VELOCITY_COEFFICIENT: f64 = 0.2;
+const NUMBER_OF_POINTS: usize = 500;
+const VELOCITY_COEFFICIENT: f64 = 1.0;
 const SHIFT: (f64, f64) = (0.0, -1.0);
 const K_D: f64 = 2.0;
 const K_P: f64 = 1.0;
 const TIME_COEFFICIENT: f64 = 0.25;
+const DT: f64 = 0.05;
 
 static mut LINEAR_VEL_REAL: f64 = 0.0;
 static mut ANGULAR_VEL_REAL: f64 = 0.0;
@@ -18,7 +19,7 @@ static CURRENT_POSE: Lazy<Mutex<geometry_msgs::PoseWithCovariance>> =
 static CURRENT_TWIST: Lazy<Mutex<geometry_msgs::TwistWithCovariance>> =
     Lazy::new(|| Mutex::new(Default::default()));
 
-const USE_PID: bool = true;
+const USE_PID: bool = false;
 
 fn main() {
     match USE_PID {
@@ -57,9 +58,10 @@ fn run_without_feedback() {
     .unwrap();
 
     let t_points = calculate_t_points();
-    let points_of_trajectory = rotate_points(&calculate_points_of_trajectory(&t_points), PI / 4.0);
-    // let points_of_trajectory = calculate_points_of_trajectory(&t_points);
+    // let points_of_trajectory = rotate_points(&calculate_points_of_trajectory(&t_points), PI / 4.0);
+    let points_of_trajectory = calculate_points_of_trajectory(&t_points);
 
+    // Publish points of trajectory to plot
     let rate = rosrust::rate(100.0);
     for point in &points_of_trajectory {
         pub_theor_trajectory
@@ -72,8 +74,7 @@ fn run_without_feedback() {
         rate.sleep();
     }
 
-    let dt = 0.05;
-    let (v, w) = calculate_velocities(&points_of_trajectory, dt);
+    let (v, w) = calculate_velocities(&points_of_trajectory, DT);
 
     let max_lin_velocity = v
         .iter()
@@ -87,6 +88,7 @@ fn run_without_feedback() {
         .fold(f64::NEG_INFINITY, f64::max);
     ros_info!("MAX_LIN_VELOCITY: {max_lin_velocity}, MAX_ANG_VELOCITY: {max_ang_velocity}");
 
+    // Remap velocities by coefficient
     let linear_velocities: Vec<f64> = v
         .iter()
         .map(|velocity| velocity * VELOCITY_COEFFICIENT)
@@ -96,6 +98,7 @@ fn run_without_feedback() {
         .map(|velocity| velocity * VELOCITY_COEFFICIENT)
         .collect();
 
+    // Publish theoretical linear velocities
     for (i, velocity) in linear_velocities.iter().enumerate() {
         pub_theor_lin_vel
             .send(geometry_msgs::Vector3 {
@@ -107,6 +110,7 @@ fn run_without_feedback() {
         rate.sleep();
     }
 
+    // Publish theoretical angualr velocities
     for (i, velocity) in angular_velocities.iter().enumerate() {
         pub_theor_ang_vel
             .send(geometry_msgs::Vector3 {
@@ -118,7 +122,29 @@ fn run_without_feedback() {
         rate.sleep();
     }
 
-    let duration = rosrust::Duration::from_nanos((dt / VELOCITY_COEFFICIENT * 1E9) as i64);
+    // Rotate robot to remove angular velocity leap on first step
+    let dx = points_of_trajectory[1].0 - points_of_trajectory[0].0;
+    let dy = points_of_trajectory[1].1 - points_of_trajectory[0].1;
+    let angle_to_rotate = dy.atan2(dx);
+    let time_to_rotation = angle_to_rotate.abs() * 5.0;
+    let duration = rosrust::Duration::from_nanos((time_to_rotation * 1E9) as i64);
+    let dw = angle_to_rotate / time_to_rotation;
+    ros_info!("angle to rotate: {angle_to_rotate}, dw: {dw}");
+    cmd_vel_pub
+        .send(geometry_msgs::Twist {
+            linear: Default::default(),
+            angular: geometry_msgs::Vector3 {
+                x: 0.0,
+                y: 0.0,
+                z: dw,
+            },
+        })
+        .unwrap();
+    rosrust::sleep(duration);
+    cmd_vel_pub.send(geometry_msgs::Twist::default()).unwrap();
+
+    // Publish velocities to robot
+    let duration = rosrust::Duration::from_nanos((DT / VELOCITY_COEFFICIENT * 1E9) as i64);
     for (i, velocity) in linear_velocities
         .iter()
         .zip(&angular_velocities)
@@ -201,8 +227,7 @@ fn run_with_pid() {
         rate.sleep();
     }
 
-    let dt = 0.05;
-    let duration = rosrust::Duration::from_nanos((dt * 1E9) as i64);
+    let duration = rosrust::Duration::from_nanos((DT * 1E9) as i64);
     let mut w = 0.0;
     let mut a = 0.0;
     let start_time = rosrust::now().seconds();
@@ -358,7 +383,8 @@ fn calculate_velocities(points: &[(f64, f64)], dt: f64) -> (Vec<f64>, Vec<f64>) 
         }
 
         dw.push(if i == 0 {
-            theta[i]
+            // theta[i]
+            0.0
         } else {
             theta[i] - theta[i - 1]
         });
